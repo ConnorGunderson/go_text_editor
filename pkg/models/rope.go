@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand"
 	"strings"
@@ -20,6 +21,9 @@ func (r *Rope) Index(i int) (*Rope, int, error) {
 
 	// if there is no left or right leaf then then the recursive indexing is at the desired leaf
 	if r.right == nil && r.left == nil {
+		if i == len(r.str) {
+			return r, 0, nil
+		}
 		return r, i, nil
 	}
 
@@ -78,10 +82,9 @@ func (r *Rope) Split(index int) (leftRope *Rope, ropeStr string, rightRope *Rope
 	}
 
 	// get desired leaf that includes index
-	r, leftoverIndex, err := r.Index(index)
+	r, leftoverIndex, err := r.Index(index + 1)
 
-	if leftoverIndex > 0 {
-
+	if leftoverIndex > 0 || index == 0 {
 		ropeFromLeftovers := CreateRope(leftoverIndex, r.str, r.parent)
 
 		if r == r.parent.left {
@@ -92,11 +95,7 @@ func (r *Rope) Split(index int) (leftRope *Rope, ropeStr string, rightRope *Rope
 
 		r = ropeFromLeftovers
 
-		_, asdf := r.Collect()
-
-		fmt.Println(asdf, r.left, leftoverIndex)
-
-		r, _, err = r.Index(index)
+		r, _, err = r.Index(leftoverIndex)
 
 		if err != nil {
 			panic(err)
@@ -230,8 +229,11 @@ func (r *Rope) Insert(idx int, str string) *Rope {
 
 func CreateRope(maxStrLen int, str string, parent *Rope) *Rope {
 
+	if maxStrLen == 0 {
+		maxStrLen = 1
+	}
+
 	if len(str) <= maxStrLen {
-		fmt.Println(str)
 		return &Rope{
 			str:    str,
 			weight: len(str),
@@ -239,8 +241,7 @@ func CreateRope(maxStrLen int, str string, parent *Rope) *Rope {
 		}
 	}
 
-	splitNum := len(str) / 2
-	fmt.Println(splitNum)
+	splitNum := int(math.Round(float64(len(str)) / 2.0))
 
 	str1 := str[:splitNum]
 	str2 := str[splitNum:]
