@@ -62,7 +62,7 @@ func (r *Rope) Split(index int) (leftRope *Rope, ropeStr string, rightRope *Rope
 	weightToSub := 0
 
 	// closure to adjust parents weight and remove right node
-	AdjustParentLeaf := func(leaf *Rope) *Rope {
+	AdjustLeaf := func(leaf *Rope) *Rope {
 		if leaf.parent != nil {
 
 			if leaf.parent.right != nil && leaf.parent.right != leaf {
@@ -107,7 +107,7 @@ func (r *Rope) Split(index int) (leftRope *Rope, ropeStr string, rightRope *Rope
 	}
 
 	for {
-		r = AdjustParentLeaf(r)
+		r = AdjustLeaf(r)
 
 		if r.parent == nil {
 			// we reconstruct the right rope from the rightRopeList populated by the AdjustParentLeaf closure
@@ -125,6 +125,7 @@ func (r *Rope) Split(index int) (leftRope *Rope, ropeStr string, rightRope *Rope
 
 }
 
+// Create a rope from a list of Rope leafs
 func RebalanceRope(rl []*Rope, start int, end int) (*Rope, error) {
 
 	if end > len(rl) {
