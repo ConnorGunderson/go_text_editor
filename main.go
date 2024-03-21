@@ -1,28 +1,85 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // https://github.com/charmbracelet/bubbletea/blob/master/examples/split-editors/main.go
 
-func main() {
+const (
+	initialInputs = 2
+	maxInputs     = 6
+	minInputs     = 1
+	helpHeight    = 5
+)
 
+func main() {
+	if _, err := tea.NewProgram(newModel(), tea.WithAltScreen()).Run(); err != nil {
+		fmt.Println("Error while running program:", err)
+		os.Exit(1)
+	}
 }
 
 type keymap = struct {
-	next, prev, add, remove, quit key.Binding
+	next, prev, add, remove, quit, removeLine key.Binding
 }
 
 type model struct {
 	width  int
 	height int
 	keymap keymap
+	help   help.Model
 	inputs []textarea.Model
 	focus  int
+}
+
+func newModel() model {
+	m := model{
+		inputs: make([]textarea.Model, initialInputs),
+		help:   help.New(),
+		keymap: keymap{
+			next: key.NewBinding(
+				key.WithKeys("tab"),
+				key.WithHelp("tab", "next"),
+			),
+			prev: key.NewBinding(
+				key.WithKeys("shift+tab"),
+				key.WithHelp("shift+tab", "prev"),
+			),
+			add: key.NewBinding(
+				key.WithKeys("ctrl+n"),
+				key.WithHelp("ctrl+n", "add an editor"),
+			),
+			remove: key.NewBinding(
+				key.WithKeys("ctrl+w"),
+				key.WithHelp("ctrl+w", "remove an editor"),
+			),
+			quit: key.NewBinding(
+				key.WithKeys("esc", "ctrl+c"),
+				key.WithHelp("esc", "quit"),
+			),
+			removeLine: key.NewBinding(
+				key.WithKeys("x"),
+				key.WithHelp("x", "remove line"),
+			),
+		},
+	}
+
+	for i := 0; i < initialInputs; i++ {
+		m.inputs[i] = newTextarea()
+	}
+
+	m.inputs[m.focus].Focus()
+	m.updateKeyBindings()
+
+	return m
 }
 
 func (m model) Init() tea.Cmd {
@@ -49,10 +106,8 @@ func newTextarea() textarea.Model {
 	return t
 }
 
-
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -66,7 +121,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keymap.next):
 			m.inputs[m.focus].Blur()
 			m.focus++
-			if m.focus > len(m.inputs) -1 {
+			if m.focus > len(m.inputs)-1 {
 				m.focus = 0
 			}
 
@@ -75,10 +130,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keymap.prev):
 			m.inputs[m.focus].Blur()
 
-			m.focus --
+			m.focus--
 
 			if m.focus < 0 {
-				m.focus = len(m.inputs)-1
+				m.focus = len(m.inputs) - 1
 			}
 
 			cmd := m.inputs[m.focus].Focus()
@@ -87,17 +142,51 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keymap.add):
 			m.inputs = append(m.inputs, newTextarea())
 		case key.Matches(msg, m.keymap.remove):
-			m.inputs = m.inputs[:len(m.inputs)-1]
-			if m.focus > len(m.inputs) - 1 {
-				m.focus = len(m.inputs) - 1
-			}
+		}
+	case tea.WindowSizeMsg:
+		m.height = msg.Height
+		m.width = msg.Width
 	}
-case tea.WindowSizeMsg:
-	m.height = msg.Height
-	m.width = msg.Width
+
+	m.updateKeyBindings()
+	m.sizeInputs()
+
+	for i := range m.inputs {
+		newModel, cmd := m.inputs[i].Update(msg)
+		m.inputs[i] = newModel
+
+		cmds = append(cmds, cmd)
+	}
+
+	return m, tea.Batch(cmds...)
 }
 
+func (m model) View() string {
+	help := m.help.ShortHelpView([]key.Binding{
+		m.keymap.next,
+		m.keymap.prev,
+		m.keymap.add,
+		m.keymap.remove,
+		m.keymap.quit,
+	})
 
-func newTextArea(tea) textarea.model {
+	var views []string
 
+	for i := range m.inputs {
+		views = append(views, m.inputs[i].View())
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, views...) + "\n\n" + help
+}
+
+func (m *model) sizeInputs() {
+	for i := range m.inputs {
+		m.inputs[i].SetWidth(m.width / len(m.inputs))
+		m.inputs[i].SetHeight(m.height - helpHeight)
+	}
+}
+
+func (m *model) updateKeyBindings() {
+	m.keymap.add.SetEnabled(len(m.inputs) < maxInputs)
+	m.keymap.remove.SetEnabled(len(m.inputs) > minInputs)
 }
