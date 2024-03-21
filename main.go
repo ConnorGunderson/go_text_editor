@@ -9,6 +9,12 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+const (
+	MinCursorX = 7
+	MinCursorY = 0
+	LogMinX    = 6
+)
+
 func main() {
 	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
 
@@ -20,15 +26,14 @@ func main() {
 	if err := mainScreen.Init(); err != nil {
 		log.Fatalf("%+v", err)
 	}
+	logger := CreateLogger(mainScreen, defStyle)
+
 	mainScreen.SetStyle(defStyle)
 	mainScreen.EnableMouse()
 	mainScreen.EnablePaste()
 	mainScreen.Clear()
 
 	quit := func() {
-		// You have to catch panics in a defer, clean up, and
-		// re-raise them - otherwise your application can
-		// die without leaving any diagnostic trace.
 		maybePanic := recover()
 		mainScreen.Fini()
 		if maybePanic != nil {
@@ -37,11 +42,9 @@ func main() {
 	}
 	defer quit()
 
-	const minCursorX = 7
-
-	cursorIndexX := minCursorX
-	cursorIndexY := 0
-	mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+	cursorPosX := MinCursorX
+	cursorPosY := MinCursorY
+	mainScreen.ShowCursor(cursorPosX, cursorPosY)
 	// Event loop
 	for {
 		// Update screen
@@ -54,17 +57,7 @@ func main() {
 		switch ev := ev.(type) {
 		case *tcell.EventResize:
 			mainScreen.Sync()
-			_, screenHeight := mainScreen.Size()
-			for i := 0; i < screenHeight; i++ {
-				whiteSpace := strings.Repeat(" ", 5-len(strconv.Itoa(i)))
-
-				screenIndexStr := fmt.Sprintf("%s%d >", whiteSpace, i)
-
-				for ri, r := range screenIndexStr {
-					mainScreen.SetContent(ri, i, r, nil, defStyle)
-				}
-			}
-
+			RemapScreen(mainScreen, logger, defStyle)
 		case *tcell.EventKey:
 			switch ev.Key() {
 			case tcell.KeyEscape, tcell.KeyCtrlC:
@@ -72,34 +65,129 @@ func main() {
 			case tcell.KeyCtrlL:
 				mainScreen.Sync()
 			case tcell.KeyUp:
-				if cursorIndexY != 0 {
-					cursorIndexY--
-					mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+				if cursorPosY != MinCursorY {
+					cursorPosY--
+					mainScreen.ShowCursor(cursorPosX, cursorPosY)
 				}
 			case tcell.KeyDown:
 				_, screenHeight := mainScreen.Size()
-				if cursorIndexY < screenHeight {
-					cursorIndexY++
-					mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+				if cursorPosY < screenHeight {
+					cursorPosY++
+					mainScreen.ShowCursor(cursorPosX, cursorPosY)
 				}
 			case tcell.KeyLeft:
-				if cursorIndexX > minCursorX {
-					cursorIndexX--
-					mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+				if cursorPosX > MinCursorX {
+					cursorPosX--
+					mainScreen.ShowCursor(cursorPosX, cursorPosY)
 				}
 			case tcell.KeyRight:
 				screenWidth, _ := mainScreen.Size()
-				if cursorIndexX < screenWidth {
-					cursorIndexX++
-					mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+				if cursorPosX < screenWidth {
+					cursorPosX++
+					mainScreen.ShowCursor(cursorPosX, cursorPosY)
 				}
-			default:
-				mainScreen.SetContent(cursorIndexX, cursorIndexY, ev.Rune(), nil, defStyle)
-				cursorIndexX++
-				mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+			case tcell.KeyCtrlR:
+				mainScreen.Clear()
+				RemapScreen(mainScreen, logger, defStyle)
+				cursorPosX = MinCursorX
+				cursorPosY = MinCursorY
+				mainScreen.ShowCursor(cursorPosX, cursorPosY)
+			case tcell.KeyBackspace:
+				if tcell.Key(ev.Modifiers()) == tcell.Key(tcell.ModCtrl) && cursorPosX > MinCursorX {
+					hasChar := false
+					for i := cursorPosX; i > MinCursorX; i-- {
+						r, _, _, _ := mainScreen.GetContent(cursorPosX, cursorPosY)
+						if r != ' ' {
+							hasChar = true
+						}
+						if r == ' ' && hasChar {
+							break
+						}
+						mainScreen.SetContent(cursorPosX, cursorPosY, ' ', nil, defStyle)
+						cursorPosX--
+						mainScreen.ShowCursor(cursorPosX, cursorPosY)
+					}
+				}
+
+				if cursorPosX == MinCursorX {
+					mainScreen.SetContent(cursorPosX, cursorPosY, ' ', nil, defStyle)
+				}
+
+				if cursorPosX > MinCursorX {
+					mainScreen.SetContent(cursorPosX, cursorPosY, ' ', nil, defStyle)
+					cursorPosX--
+					mainScreen.ShowCursor(cursorPosX, cursorPosY)
+				}
+			case tcell.KeyRune:
+				mainScreen.SetContent(cursorPosX, cursorPosY, ev.Rune(), nil, defStyle)
+				cursorPosX++
+				mainScreen.ShowCursor(cursorPosX, cursorPosY)
 			}
 		case *tcell.EventMouse:
-			// x, y := ev.Position()
+			x, y := ev.Position()
+
+			if ev.Buttons() == tcell.ButtonPrimary {
+				if x > MinCursorX {
+					cursorPosX = x
+					cursorPosY = y
+					mainScreen.ShowCursor(cursorPosX, cursorPosY)
+				}
+			}
+
+		}
+	}
+}
+
+type Logger struct {
+	screen tcell.Screen
+	style  tcell.Style
+}
+
+func (l Logger) Log(str string) {
+	screenWidth, screenHeight := l.screen.Size()
+	for i := range screenWidth {
+		if i > LogMinX {
+			l.screen.SetContent(i, screenHeight, ' ', nil, l.style)
+		}
+	}
+	for i, r := range str {
+		l.screen.SetContent(LogMinX+i, screenHeight, r, nil, l.style)
+	}
+
+}
+
+func (l Logger) Reset() {
+	logStr := "Log: "
+
+	_, screenHeight := l.screen.Size()
+
+	for i, r := range logStr {
+		l.screen.SetContent(i, screenHeight-1, r, nil, l.style)
+	}
+}
+
+func CreateLogger(screen tcell.Screen, style tcell.Style) Logger {
+	logger := Logger{
+		screen,
+		style,
+	}
+
+	return logger
+}
+
+func RemapScreen(t tcell.Screen, logger Logger, style tcell.Style) {
+	_, screenHeight := t.Size()
+
+	logger.Reset()
+
+	for i := 0; i < screenHeight-1; i++ {
+
+		whiteSpace := strings.Repeat(" ", 5-len(strconv.Itoa(i)))
+
+		screenIndexStr := fmt.Sprintf("%s%d >", whiteSpace, i)
+
+		for ri, r := range screenIndexStr {
+			t.SetContent(ri, i, r, nil, style)
 		}
 	}
 }
