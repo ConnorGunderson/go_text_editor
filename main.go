@@ -2,191 +2,104 @@ package main
 
 import (
 	"fmt"
-	"os"
+	"log"
+	"strconv"
+	"strings"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-)
-
-// https://github.com/charmbracelet/bubbletea/blob/master/examples/split-editors/main.go
-
-const (
-	initialInputs = 2
-	maxInputs     = 6
-	minInputs     = 1
-	helpHeight    = 5
+	"github.com/gdamore/tcell/v2"
 )
 
 func main() {
-	if _, err := tea.NewProgram(newModel(), tea.WithAltScreen()).Run(); err != nil {
-		fmt.Println("Error while running program:", err)
-		os.Exit(1)
+	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
+
+	// Initialize screen
+	mainScreen, err := tcell.NewScreen()
+	if err != nil {
+		log.Fatalf("%+v", err)
 	}
-}
-
-type keymap = struct {
-	next, prev, add, remove, quit, removeLine key.Binding
-}
-
-type model struct {
-	width  int
-	height int
-	keymap keymap
-	help   help.Model
-	inputs []textarea.Model
-	focus  int
-}
-
-func newModel() model {
-	m := model{
-		inputs: make([]textarea.Model, initialInputs),
-		help:   help.New(),
-		keymap: keymap{
-			next: key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "next"),
-			),
-			prev: key.NewBinding(
-				key.WithKeys("shift+tab"),
-				key.WithHelp("shift+tab", "prev"),
-			),
-			add: key.NewBinding(
-				key.WithKeys("ctrl+n"),
-				key.WithHelp("ctrl+n", "add an editor"),
-			),
-			remove: key.NewBinding(
-				key.WithKeys("ctrl+w"),
-				key.WithHelp("ctrl+w", "remove an editor"),
-			),
-			quit: key.NewBinding(
-				key.WithKeys("esc", "ctrl+c"),
-				key.WithHelp("esc", "quit"),
-			),
-			removeLine: key.NewBinding(
-				key.WithKeys("x"),
-				key.WithHelp("x", "remove line"),
-			),
-		},
+	if err := mainScreen.Init(); err != nil {
+		log.Fatalf("%+v", err)
 	}
+	mainScreen.SetStyle(defStyle)
+	mainScreen.EnableMouse()
+	mainScreen.EnablePaste()
+	mainScreen.Clear()
 
-	for i := 0; i < initialInputs; i++ {
-		m.inputs[i] = newTextarea()
-	}
-
-	m.inputs[m.focus].Focus()
-	m.updateKeyBindings()
-
-	return m
-}
-
-func (m model) Init() tea.Cmd {
-	return textarea.Blink
-}
-
-func newTextarea() textarea.Model {
-	t := textarea.New()
-	t.Prompt = ""
-	t.Placeholder = "Type something"
-	t.ShowLineNumbers = true
-	// t.Cursor.Style = cursorStyle
-	// t.FocusedStyle.Placeholder = focusedPlaceholderStyle
-	// t.BlurredStyle.Placeholder = placeholderStyle
-	// t.FocusedStyle.CursorLine = cursorLineStyle
-	// t.FocusedStyle.Base = focusedBorderStyle
-	// t.BlurredStyle.Base = blurredBorderStyle
-	// t.FocusedStyle.EndOfBuffer = endOfBufferStyle
-	// t.BlurredStyle.EndOfBuffer = endOfBufferStyle
-	t.KeyMap.DeleteWordBackward.SetEnabled(false)
-	t.KeyMap.LineNext = key.NewBinding(key.WithKeys("down"))
-	t.KeyMap.LinePrevious = key.NewBinding(key.WithKeys("up"))
-	t.Blur()
-	return t
-}
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, m.keymap.quit):
-			for i := range m.inputs {
-				m.inputs[i].Blur()
-			}
-
-			return m, tea.Quit
-		case key.Matches(msg, m.keymap.next):
-			m.inputs[m.focus].Blur()
-			m.focus++
-			if m.focus > len(m.inputs)-1 {
-				m.focus = 0
-			}
-
-			cmd := m.inputs[m.focus].Focus()
-			cmds = append(cmds, cmd)
-		case key.Matches(msg, m.keymap.prev):
-			m.inputs[m.focus].Blur()
-
-			m.focus--
-
-			if m.focus < 0 {
-				m.focus = len(m.inputs) - 1
-			}
-
-			cmd := m.inputs[m.focus].Focus()
-
-			cmds = append(cmds, cmd)
-		case key.Matches(msg, m.keymap.add):
-			m.inputs = append(m.inputs, newTextarea())
-		case key.Matches(msg, m.keymap.remove):
+	quit := func() {
+		// You have to catch panics in a defer, clean up, and
+		// re-raise them - otherwise your application can
+		// die without leaving any diagnostic trace.
+		maybePanic := recover()
+		mainScreen.Fini()
+		if maybePanic != nil {
+			panic(maybePanic)
 		}
-	case tea.WindowSizeMsg:
-		m.height = msg.Height
-		m.width = msg.Width
 	}
+	defer quit()
 
-	m.updateKeyBindings()
-	m.sizeInputs()
+	const minCursorX = 7
 
-	for i := range m.inputs {
-		newModel, cmd := m.inputs[i].Update(msg)
-		m.inputs[i] = newModel
+	cursorIndexX := minCursorX
+	cursorIndexY := 0
+	mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+	// Event loop
+	for {
+		// Update screen
+		mainScreen.Show()
 
-		cmds = append(cmds, cmd)
+		// Poll event
+		ev := mainScreen.PollEvent()
+
+		// Process event
+		switch ev := ev.(type) {
+		case *tcell.EventResize:
+			mainScreen.Sync()
+			_, screenHeight := mainScreen.Size()
+			for i := 0; i < screenHeight; i++ {
+				whiteSpace := strings.Repeat(" ", 5-len(strconv.Itoa(i)))
+
+				screenIndexStr := fmt.Sprintf("%s%d >", whiteSpace, i)
+
+				for ri, r := range screenIndexStr {
+					mainScreen.SetContent(ri, i, r, nil, defStyle)
+				}
+			}
+
+		case *tcell.EventKey:
+			switch ev.Key() {
+			case tcell.KeyEscape, tcell.KeyCtrlC:
+				return
+			case tcell.KeyCtrlL:
+				mainScreen.Sync()
+			case tcell.KeyUp:
+				if cursorIndexY != 0 {
+					cursorIndexY--
+					mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+				}
+			case tcell.KeyDown:
+				_, screenHeight := mainScreen.Size()
+				if cursorIndexY < screenHeight {
+					cursorIndexY++
+					mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+				}
+			case tcell.KeyLeft:
+				if cursorIndexX > minCursorX {
+					cursorIndexX--
+					mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+				}
+			case tcell.KeyRight:
+				screenWidth, _ := mainScreen.Size()
+				if cursorIndexX < screenWidth {
+					cursorIndexX++
+					mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+				}
+			default:
+				mainScreen.SetContent(cursorIndexX, cursorIndexY, ev.Rune(), nil, defStyle)
+				cursorIndexX++
+				mainScreen.ShowCursor(cursorIndexX, cursorIndexY)
+			}
+		case *tcell.EventMouse:
+			// x, y := ev.Position()
+		}
 	}
-
-	return m, tea.Batch(cmds...)
-}
-
-func (m model) View() string {
-	help := m.help.ShortHelpView([]key.Binding{
-		m.keymap.next,
-		m.keymap.prev,
-		m.keymap.add,
-		m.keymap.remove,
-		m.keymap.quit,
-	})
-
-	var views []string
-
-	for i := range m.inputs {
-		views = append(views, m.inputs[i].View())
-	}
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, views...) + "\n\n" + help
-}
-
-func (m *model) sizeInputs() {
-	for i := range m.inputs {
-		m.inputs[i].SetWidth(m.width / len(m.inputs))
-		m.inputs[i].SetHeight(m.height - helpHeight)
-	}
-}
-
-func (m *model) updateKeyBindings() {
-	m.keymap.add.SetEnabled(len(m.inputs) < maxInputs)
-	m.keymap.remove.SetEnabled(len(m.inputs) > minInputs)
 }

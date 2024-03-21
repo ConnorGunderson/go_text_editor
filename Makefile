@@ -8,7 +8,7 @@ vet: fmt
 	go vet
 
 build: 
-	GOARCH=amd64 GOOS=windows CGO_ENABLED=1 go build -o ./target/${BINARY_NAME}-windows.exe main.go
+	go build -o ./target/${BINARY_NAME}-windows.exe main.go
 
 run: build 
 	./target/${BINARY_NAME}-windows 
